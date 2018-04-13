@@ -5,9 +5,9 @@ from VisdomPortal.visportal.core import VisdomPortal
 from torch import nn
 from torch.autograd import Variable
 from torchvision import transforms
-from lib.image_history_buffer import ImageHistoryBuffer
-from lib.network import Discriminator, Refiner
-from lib.image_utils import generate_img_batch, get_accuracy
+from helper_func.image_history_buffer import ImageHistoryBuffer
+from helper_func.network import Discriminator, Refiner
+from helper_func.image_utils import generate_img_batch, get_accuracy
 import config as cfg
 import os
 
@@ -86,10 +86,10 @@ class Main(object):
 
         fake_folder = torchvision.datasets.ImageFolder(root=cfg.syn_path, transform=transform)
         self.fake_images_loader = Data.DataLoader(fake_folder, batch_size=cfg.batch_size, shuffle=True,
-                                                  pin_memory=True, drop_last=True)
+                                                  pin_memory=False, drop_last=True, num_workers=0)
         real_folder = torchvision.datasets.ImageFolder(root=cfg.real_path, transform=transform)
         self.real_images_loader = Data.DataLoader(real_folder, batch_size=cfg.batch_size, shuffle=True,
-                                                  pin_memory=True, drop_last=True)
+                                                  pin_memory=False, drop_last=True, num_workers=0)
 
 
     def pretrain_generator(self):
@@ -228,10 +228,10 @@ class Main(object):
                 d_loss.backward()
                 self.discriminator_loss.step()
 
+            if step % cfg.d_pre_per == 0:
                 print('(Discrimintor) loss:%.4f real:%.4f(%.2f) refined:%.4f(%.2f)'
                       % (d_loss.data[0] / 2, pred_loss_real.data[0], acc_real, pred_loss_refn.data[0], acc_ref))
 
-            if step % cfg.d_pre_per == 0:
                 vis.draw_curve(value=r_loss, step=step, title='Refiner Loss')
                 vis.draw_curve(value=d_loss, step=step, title='Discriminator Loss')
                 vis.draw_curve(value=acc_real, step=step, title='Real Images Discriminator Accuracy')

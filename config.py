@@ -42,7 +42,7 @@ k_g = 2  # number of generative network updates per step, the author of the pape
 # output R pre-training result per times
 r_pre_per = 50
 # output D pre-training result per times
-d_pre_per = 10
+d_pre_per = 50
 # save model dictionary and training dataset output result per train times
 save_per = 1000
 
