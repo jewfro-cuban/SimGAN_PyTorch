@@ -5,12 +5,9 @@ cuda_use = torch.cuda.is_available()
 # which cuda to use
 cuda_num = 0
 
-# learning rate for D, the lr in Apple blog is 0.0001
-d_lr = 0.001
-# learning rate for R, the lr in Apple blog is 0.0001
-r_lr = 0.001
+init_lr = 0.001
 # lambda in paper, the author of the paper said it's 0.01
-delta = 0.0001
+delta = 0.01
 img_width = 55
 img_height = 35
 img_channels = 1
@@ -28,9 +25,9 @@ pics_line = 4
 
 # =================== training params ======================
 # pre-train R times
-r_pretrain = 1  # 1000
+g_pretrain = 1000
 # pre-train D times
-d_pretrain = 1  # 200
+d_pretrain = 100
 # train steps
 train_steps = 10000000
 
@@ -38,23 +35,19 @@ batch_size = 128
 # test_batch_size = 128
 # the history buffer size
 buffer_size = 12800
+
 k_d = 1  # number of discriminator updates per step
-k_g = 50  # number of generative network updates per step, the author of the paper said it's 50
+k_g = 2  # number of generative network updates per step, the author of the paper said it's 50
 
 # output R pre-training result per times
 r_pre_per = 50
 # output D pre-training result per times
-d_pre_per = 50
+d_pre_per = 10
 # save model dictionary and training dataset output result per train times
 save_per = 1000
 
 # file root
 save_path = 'models'
-# pre-training dictionary path
-# ref_pre_path = 'models/R_pre.pkl'
-# ref_pre_path = None
-# disc_pre_path = 'models/D_pre.pkl'
-# disc_pre_path = None
 
 # dictionary saving path
 D_path = 'D_%d.pkl'
