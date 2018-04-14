@@ -34,6 +34,26 @@ class VisdomPortal():
         else:
             self.win_handles[title] = self.vis.line(value, step, opts={'title': title})
 
+    def draw_bars(self, value, title, legends=[]):
+        if isinstance(value, dict):
+            keys = []
+            vals = []
+            for key, val in value.items():
+                keys.append(key)
+                vals.append(val)
+            legends = keys
+            value = torch.from_numpy(np.array(vals))
+        elif isinstance(value, list):
+            value = torch.from_numpy(np.array(value))
+
+        if title in self.win_handles:
+            win_name = self.win_handles[title]
+            self.vis.bar(value, win=win_name, opts={'legend': legends})
+        else:
+            self.win_handles[title] = self.vis.bar(value, opts={'legend': legends})
+
+
+
     def draw_images(self, value, title, unnormalize=True):
         assert isinstance(value, (torch.autograd.variable.Variable, torch._TensorBase,
                                   np.ndarray)), 'Value type should be torch variable, torch tensor or numpy.ndarray.'
