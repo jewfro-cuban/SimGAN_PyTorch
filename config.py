@@ -7,7 +7,7 @@ cuda_num = 0
 
 init_lr = 0.001
 # lambda in paper, the author of the paper said it's 0.01
-delta = 0.01
+delta = 0.0001
 img_width = 55
 img_height = 35
 img_channels = 1
