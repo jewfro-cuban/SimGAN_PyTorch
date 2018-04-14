@@ -52,7 +52,7 @@ class Main(object):
             {'params': self.D.parameters()}
         ], lr=cfg.init_lr)
 
-        self.self_regularization_loss = nn.L1Loss(size_average=True)
+        self.self_regularization_loss = nn.L1Loss(size_average=False)
         self.local_adversarial_loss = nn.CrossEntropyLoss(size_average=True)
         self.delta = cfg.delta
 
