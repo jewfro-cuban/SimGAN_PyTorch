@@ -1,4 +1,5 @@
 import os
+import time
 import torch
 import torch.utils.data as Data
 import torchvision
@@ -170,8 +171,9 @@ class Main(object):
                                                   cfg.buffer_size, cfg.batch_size)
 
         assert self.current_step < cfg.train_steps, 'Target step is smaller than current step!'
-
+        step_timer = time.time()
         for step in range(self.current_step, cfg.train_steps):
+
             self.current_step = step
             self.D.train()
             self.G.train()
@@ -254,9 +256,9 @@ class Main(object):
                 self.my_timer.add_value('combine_backward')
 
             if step % cfg.d_pre_per == 0:
-                print('------Step[%d/%d]------' % (step, cfg.train_steps))
+                print('------Step[%d/%d]------Time Cost: %.2f seconds' % (step, cfg.train_steps, time.time() - step_timer))
                 print('# Refiner: loss:%.4f reg_loss:%.4f, adv_loss:%.4f' % (
-                r_loss.data[0], reg_loss.data[0], adv_loss.data[0]))
+                    r_loss.data[0], reg_loss.data[0], adv_loss.data[0]))
                 print('# Discrimintor: loss:%.4f real:%.4f(%.2f) refined:%.4f(%.2f)'
                       % (d_loss.data[0] / 2, pred_loss_real.data[0], acc_real, pred_loss_refn.data[0], acc_ref))
 
@@ -271,6 +273,7 @@ class Main(object):
 
                 time_dict = self.my_timer.get_all_time()
                 vis.draw_bars(time_dict, 'Time Costs')
+                step_timer = time.time()
 
             if step % cfg.save_per == 0 and step > 0:
                 print('Save two model dict.')
