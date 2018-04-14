@@ -1,51 +1,19 @@
+import os
 import torch
 import torch.utils.data as Data
 import torchvision
-from VisdomPortal.visportal.core import VisdomPortal
-from torch import nn
-import numpy as np
 from torch.autograd import Variable
 from torchvision import transforms
+from torch import nn
+
+from VisdomPortal.visportal.core import VisdomPortal
 from helper_func.image_history_buffer import ImageHistoryBuffer
 from helper_func.network import Discriminator, Refiner
-from helper_func.image_utils import generate_img_batch, get_accuracy
+from helper_func.external_func import get_accuracy, loop_iter, MyTimer
 import config as cfg
-import os
 
-import time
 
 vis = VisdomPortal(env_name='SimGAN_{}'.format('Eye'))
-
-
-def loop_iter(dataloader):
-    while True:
-        for data in iter(dataloader):
-            yield data
-
-
-class MyTimer():
-    def __init__(self):
-        self.time_dict = {}
-        self.count_dict = {}
-        self.t0 = 0.
-
-    def track(self):
-        self.t0 = time.time()
-
-    def add_value(self, title):
-        value = time.time() - self.t0
-        self.t0 = 0.
-
-        if not title in self.time_dict:
-            self.time_dict[title] = value
-            self.count_dict[title] = 1
-        else:
-            self.time_dict[title] = (self.time_dict[title] * self.count_dict[title] + value)
-            self.count_dict[title] += 1
-            self.time_dict[title] /= self.count_dict[title]
-
-    def get_all_time(self):
-        return self.time_dict
 
 
 class Main(object):
@@ -150,7 +118,8 @@ class Main(object):
             self.refiner_optimizer.step()
             # save
             if (step % cfg.r_pre_per == 0) or (step == cfg.g_pretrain - 1):
-                print('[%d/%d] (Refiner) loss: %.4f' % (step, cfg.g_pretrain, reg_loss.data[0]))
+                print('------Step[%d/%d]------' % (step, cfg.g_pretrain))
+                print('# Refiner: loss: %.4f' % (reg_loss.data[0]))
                 vis.draw_curve(value=reg_loss, step=step, title='Pretrain Refiner Loss')
                 torch.save(self.G.state_dict(), os.path.join(cfg.save_path, 'R_0.pkl'))
 
@@ -187,8 +156,9 @@ class Main(object):
 
             if step % cfg.d_pre_per == 0 or (step == cfg.d_pretrain - 1):
                 vis.draw_curve(value=d_loss, step=step, title='Pretrain Discriminator Loss')
-                print('[%d/%d] (Discriminator) loss:%f  accuracy_real:%.2f accuracy_ref:%.2f'
-                      % (step, cfg.d_pretrain, d_loss.data[0], acc_real, acc_ref))
+                print('------Step[%d/%d]------' % (step, cfg.d_pretrain))
+                print('# Discriminator: loss:%f  accuracy_real:%.2f accuracy_ref:%.2f'
+                      % (d_loss.data[0], acc_real, acc_ref))
 
         print('Save D_pre to models/D_0.pkl')
         torch.save(self.D.state_dict(), os.path.join(cfg.save_path, 'D_0.pkl'))
@@ -285,9 +255,9 @@ class Main(object):
 
             if step % cfg.d_pre_per == 0:
                 print('------Step[%d/%d]------' % (step, cfg.train_steps))
-                print('(Refiner) loss:%.4f reg_loss:%.4f, adv_loss:%.4f' % (
+                print('# Refiner: loss:%.4f reg_loss:%.4f, adv_loss:%.4f' % (
                 r_loss.data[0], reg_loss.data[0], adv_loss.data[0]))
-                print('(Discrimintor) loss:%.4f real:%.4f(%.2f) refined:%.4f(%.2f)'
+                print('# Discrimintor: loss:%.4f real:%.4f(%.2f) refined:%.4f(%.2f)'
                       % (d_loss.data[0] / 2, pred_loss_real.data[0], acc_real, pred_loss_refn.data[0], acc_ref))
 
                 # visualization
@@ -300,7 +270,7 @@ class Main(object):
                 vis.draw_curve(value=acc_ref, step=step, title='Refined Images Discriminator Accuracy')
 
                 time_dict = self.my_timer.get_all_time()
-                vis.draw_bars(time_dict, 'time_costs')
+                vis.draw_bars(time_dict, 'Time Costs')
 
             if step % cfg.save_per == 0 and step > 0:
                 print('Save two model dict.')

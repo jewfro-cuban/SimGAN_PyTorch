@@ -1,0 +1,3 @@
+[submodule "VisdomPortal"]
+	path = VisdomPortal
+	url = git@github.com:automan000/VisdomPortal.git
