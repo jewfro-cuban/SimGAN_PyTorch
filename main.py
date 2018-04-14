@@ -8,9 +8,9 @@ from torchvision import transforms
 from torch import nn
 
 from VisdomPortal.visportal.core import VisdomPortal
-from helper_func.image_history_buffer import ImageHistoryBuffer
-from helper_func.network import Discriminator, Refiner
-from helper_func.external_func import get_accuracy, loop_iter, MyTimer
+from utils.image_history_buffer import ImageHistoryBuffer
+from utils.network import Discriminator, Refiner
+from utils.external_func import get_accuracy, loop_iter, MyTimer
 import config as cfg
 
 
@@ -45,7 +45,7 @@ class Main(object):
             self.G.cuda(cfg.cuda_num)
             self.D.cuda(cfg.cuda_num)
 
-        self.refiner_optimizer = torch.optim.SGD(self.G.parameters(), lr=cfg.init_lr)
+        self.refiner_optimizer = torch.optim.Adam(self.G.parameters(), lr=cfg.init_lr)
         self.discriminator_loss = torch.optim.SGD(self.D.parameters(), lr=cfg.init_lr)
         self.combined_optimizer = torch.optim.SGD([
             {'params': self.G.parameters()},
@@ -182,15 +182,15 @@ class Main(object):
                 self.my_timer.track()
                 fake_images, _ = next(self.fake_images_iter)
                 fake_images = Variable(fake_images).cuda(cfg.cuda_num)
-                self.my_timer.add_value('get_fake_images')
+                self.my_timer.add_value('Read Fake Images')
                 # forward #1
                 self.my_timer.track()
                 refined_images = self.G(fake_images)
-                self.my_timer.add_value('refine_fake')
+                self.my_timer.add_value('Refine Fake Images')
                 # forward #2
                 self.my_timer.track()
                 refined_predictions = self.D(refined_images).view(-1, 2)
-                self.my_timer.add_value('predict_fake')
+                self.my_timer.add_value('Predict Fake Images')
                 # calculate loss
                 self.my_timer.track()
                 refined_labels = Variable(torch.zeros(refined_predictions.size(0)).type(torch.LongTensor)).cuda(cfg.cuda_num)
@@ -198,13 +198,13 @@ class Main(object):
                 reg_loss = torch.mul(reg_loss, self.delta)
                 adv_loss = self.local_adversarial_loss(refined_predictions, refined_labels)
                 r_loss = reg_loss + adv_loss
-                self.my_timer.add_value('refine_loss')
+                self.my_timer.add_value('Get Refine Loss')
                 # backward
                 self.my_timer.track()
                 self.combined_optimizer.zero_grad()
                 r_loss.backward()
                 self.combined_optimizer.step()
-                self.my_timer.add_value('refine_backward')
+                self.my_timer.add_value('Backward Refine Loss')
 
             # ========= train the D =========
             self.G.eval()
@@ -217,11 +217,11 @@ class Main(object):
                 fake_images = Variable(fake_images).cuda(cfg.cuda_num)
                 real_images, _ = next(self.real_images_iter)
                 real_images = Variable(real_images).cuda(cfg.cuda_num)
-                self.my_timer.add_value('get_all_images')
+                self.my_timer.add_value('Read All Images')
                 # generate refined images
                 self.my_timer.track()
                 refined_images = self.G(fake_images)
-                self.my_timer.add_value('refine_fake')
+                self.my_timer.add_value('Refine Fake Images')
                 # use a history of refined images
                 self.my_timer.track()
                 refined_images = refined_images.detach()
@@ -231,12 +231,12 @@ class Main(object):
                     history_refined_images = torch.from_numpy(half_batch_from_image_history)
                     history_refined_images = Variable(history_refined_images).cuda(cfg.cuda_num)
                     refined_images[:cfg.batch_size // 2] = history_refined_images
-                self.my_timer.add_value('get_history_im')
+                self.my_timer.add_value('Get History Images')
                 # predict images
                 self.my_timer.track()
                 real_predictions = self.D(real_images).view(-1, 2)
                 refined_predictions = self.D(refined_images).view(-1, 2)
-                self.my_timer.add_value('predict_all')
+                self.my_timer.add_value('Predict All Images')
                 # get all loss
                 self.my_timer.track()
                 real_labels = Variable(torch.zeros(real_predictions.size(0)).type(torch.LongTensor)).cuda(
@@ -248,12 +248,12 @@ class Main(object):
                 pred_loss_refn = self.local_adversarial_loss(refined_predictions, refined_labels)
                 acc_ref = get_accuracy(refined_predictions, 'refine')
                 d_loss = pred_loss_refn + pred_loss_real
-                self.my_timer.add_value('combine_loss')
+                self.my_timer.add_value('Get Combine Loss')
                 self.my_timer.track()
                 self.D.zero_grad()
                 d_loss.backward()
                 self.discriminator_loss.step()
-                self.my_timer.add_value('combine_backward')
+                self.my_timer.add_value('Backward Combine Loss')
 
             if step % cfg.d_pre_per == 0:
                 print('------Step[%d/%d]------Time Cost: %.2f seconds' % (step, cfg.train_steps, time.time() - step_timer))
@@ -272,7 +272,7 @@ class Main(object):
                 vis.draw_curve(value=acc_ref, step=step, title='Refined Images Discriminator Accuracy')
 
                 time_dict = self.my_timer.get_all_time()
-                vis.draw_bars(time_dict, 'Time Costs')
+                vis.draw_bars(time_dict, 'Time Cost (second)')
                 step_timer = time.time()
 
             if step % cfg.save_per == 0 and step > 0:

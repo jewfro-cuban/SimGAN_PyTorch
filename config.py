@@ -16,12 +16,7 @@ img_channels = 1
 syn_path = 'data/SynthEyes'
 # real image path
 real_path = 'data/MPIIGaze'
-# training result path to save
-train_res_path = 'results'
-# final_res_path = 'final_res'
 
-# result show in 4 sample per line
-pics_line = 4
 
 # =================== training params ======================
 # pre-train R times
@@ -29,15 +24,14 @@ g_pretrain = 1000
 # pre-train D times
 d_pretrain = 100
 # train steps
-train_steps = 10000000
+train_steps = 10000
 
 batch_size = 128
-# test_batch_size = 128
 # the history buffer size
 buffer_size = 12800
 
 k_d = 1  # number of discriminator updates per step
-k_g = 2  # number of generative network updates per step, the author of the paper said it's 50
+k_g = 5  # number of generative network updates per step, the author of the paper said it's 50
 
 # output R pre-training result per times
 r_pre_per = 50
