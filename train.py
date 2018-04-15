@@ -6,15 +6,16 @@ import torchvision
 from torch.autograd import Variable
 from torchvision import transforms
 from torch import nn
+import numpy as np
 
 from VisdomPortal.visportal.core import VisdomPortal
 from utils.image_history_buffer import ImageHistoryBuffer
 from utils.network import Discriminator, Refiner
 from utils.external_func import get_accuracy, loop_iter, MyTimer
 import config as cfg
+import tqdm
 
-
-vis = VisdomPortal(env_name='SimGAN_{}'.format('Eye2'))
+vis = VisdomPortal(env_name='SimGAN_{}'.format('Eye3'))
 
 
 class Main(object):
@@ -52,7 +53,7 @@ class Main(object):
             {'params': self.D.parameters()}
         ], lr=cfg.init_lr)
 
-        self.self_regularization_loss = nn.L1Loss(size_average=False)
+        self.self_regularization_loss = nn.L1Loss(size_average=True)
         self.local_adversarial_loss = nn.CrossEntropyLoss(size_average=True)
         self.delta = cfg.delta
 
@@ -90,13 +91,12 @@ class Main(object):
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
         fake_folder = torchvision.datasets.ImageFolder(root=cfg.syn_path, transform=transform)
+        real_folder = torchvision.datasets.ImageFolder(root=cfg.real_path, transform=transform)
 
         self.fake_images_loader = Data.DataLoader(fake_folder, batch_size=cfg.batch_size, shuffle=True,
-                                                  pin_memory=False, drop_last=True, num_workers=3)
-
-        real_folder = torchvision.datasets.ImageFolder(root=cfg.real_path, transform=transform)
+                                                  pin_memory=True, drop_last=True, num_workers=3)
         self.real_images_loader = Data.DataLoader(real_folder, batch_size=cfg.batch_size, shuffle=True,
-                                                  pin_memory=False, drop_last=True, num_workers=3)
+                                                  pin_memory=True, drop_last=True, num_workers=3)
         self.fake_images_iter = loop_iter(self.fake_images_loader)
         self.real_images_iter = loop_iter(self.real_images_loader)
 
@@ -136,20 +136,21 @@ class Main(object):
             real_labels = Variable(torch.ones(real_predictions.size(0)).type(torch.LongTensor)).cuda(cfg.cuda_num)
             acc_real = get_accuracy(real_predictions, 'real')
             loss_real = self.local_adversarial_loss(real_predictions, real_labels)
-
             self.discriminator_optimizer.zero_grad()
             loss_real.backward()
             self.discriminator_optimizer.step()
+
             # for fake images
             fake_images, _ = next(self.fake_images_iter)
             fake_images = Variable(fake_images).cuda(cfg.cuda_num)
+
+            # refined_images = fake_images
             refined_images = self.G(fake_images)
             refined_predictions = self.D(refined_images).view(-1, 2)
             refined_labels = Variable(torch.zeros(refined_predictions.size(0)).type(torch.LongTensor)).cuda(
                 cfg.cuda_num)
             acc_ref = get_accuracy(refined_predictions, 'refine')
             loss_ref = self.local_adversarial_loss(refined_predictions, refined_labels)
-
             self.discriminator_optimizer.zero_grad()
             loss_ref.backward()
             self.discriminator_optimizer.step()
@@ -178,7 +179,7 @@ class Main(object):
             self.D.train()
             self.G.train()
 
-            for index in range(cfg.k_g*2):
+            for index in tqdm.tqdm(range(cfg.k_g)):
                 self.my_timer.track()
                 fake_images, _ = next(self.fake_images_iter)
                 fake_images = Variable(fake_images).cuda(cfg.cuda_num)
@@ -193,7 +194,7 @@ class Main(object):
                 self.my_timer.add_value('Predict Fake Images')
                 # calculate loss
                 self.my_timer.track()
-                refined_labels = Variable(torch.zeros(refined_predictions.size(0)).type(torch.LongTensor)).cuda(cfg.cuda_num)
+                refined_labels = Variable(torch.ones(refined_predictions.size(0)).type(torch.LongTensor)).cuda(cfg.cuda_num)
                 reg_loss = self.self_regularization_loss(refined_images, fake_images)
                 reg_loss = torch.mul(reg_loss, self.delta)
                 adv_loss = self.local_adversarial_loss(refined_predictions, refined_labels)
@@ -226,12 +227,20 @@ class Main(object):
                 self.my_timer.track()
                 refined_images = refined_images.detach()
                 images_diff = torch.mean(torch.abs(refined_images - fake_images)).cpu().data.numpy()
-                half_batch_from_image_history = image_history_buffer.get_from_image_history_buffer()
-                image_history_buffer.add_to_image_history_buffer(refined_images.cpu().data.numpy())
-                if len(half_batch_from_image_history):
-                    history_refined_images = torch.from_numpy(half_batch_from_image_history)
-                    history_refined_images = Variable(history_refined_images).cuda(cfg.cuda_num)
-                    refined_images[:cfg.batch_size // 2] = history_refined_images
+
+                # print('-------------------------------------------')
+                # half_batch_from_image_history = image_history_buffer.get_from_image_history_buffer()
+                # print('Get real images mean: {}'.format(np.mean(fake_images.cpu().data.numpy())))
+                # print('Get fake images mean: {}'.format(np.mean(real_images.cpu().data.numpy())))
+                # print('Get history images mean: {}'.format(np.mean(half_batch_from_image_history)))
+                # print('Add history images mean: {}'.format(np.mean(refined_images.cpu().data.numpy())))
+                # image_history_buffer.add_to_image_history_buffer(refined_images.cpu().data.numpy())
+
+                # if len(half_batch_from_image_history):
+                #     history_refined_images = torch.from_numpy(half_batch_from_image_history)
+                #     history_refined_images = Variable(history_refined_images).cuda(cfg.cuda_num)
+                #     refined_images[:cfg.batch_size // 2] = history_refined_images
+
                 self.my_timer.add_value('Get History Images')
                 # predict images
                 self.my_timer.track()
@@ -248,23 +257,28 @@ class Main(object):
 
                 pred_loss_real = self.local_adversarial_loss(real_predictions, real_labels)
                 acc_real = get_accuracy(real_predictions, 'real')
-
-                pred_loss_refn = self.local_adversarial_loss(refined_predictions, refined_labels)
+                pred_loss_ref = self.local_adversarial_loss(refined_predictions, refined_labels)
                 acc_ref = get_accuracy(refined_predictions, 'refine')
-                d_loss = pred_loss_refn + pred_loss_real
                 self.my_timer.add_value('Get Combine Loss')
+
                 self.my_timer.track()
-                self.D.zero_grad()
-                d_loss.backward()
+                # backward real discriminator loss
+                self.discriminator_optimizer.zero_grad()
+                pred_loss_real.backward()
+                self.discriminator_optimizer.step()
+                # backward refined discriminator loss
+                self.discriminator_optimizer.zero_grad()
+                pred_loss_ref.backward()
                 self.discriminator_optimizer.step()
                 self.my_timer.add_value('Backward Combine Loss')
 
             if step % cfg.f_per == 0:
+                d_loss = (pred_loss_ref + pred_loss_real) / 2
                 print('------Step[%d/%d]------Time Cost: %.2f seconds' % (step, cfg.train_steps, time.time() - step_timer))
                 print('# Refiner: loss:%.4f reg_loss:%.4f, adv_loss:%.4f' % (
                     refine_loss.data[0], reg_loss.data[0], adv_loss.data[0]))
                 print('# Discrimintor: loss:%.4f real:%.4f(%.2f) refined:%.4f(%.2f)'
-                      % (d_loss.data[0] / 2, pred_loss_real.data[0], acc_real, pred_loss_refn.data[0], acc_ref))
+                      % (d_loss.data[0] / 2, pred_loss_real.data[0], acc_real, pred_loss_ref.data[0], acc_ref))
 
                 # visualization
                 vis.draw_images(real_images, 'Real Images')
