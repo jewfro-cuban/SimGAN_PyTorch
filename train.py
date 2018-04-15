@@ -14,7 +14,7 @@ from utils.external_func import get_accuracy, loop_iter, MyTimer
 import config as cfg
 
 
-vis = VisdomPortal(env_name='SimGAN_{}'.format('Eye'))
+vis = VisdomPortal(env_name='SimGAN_{}'.format('Eye2'))
 
 
 class Main(object):
@@ -23,7 +23,7 @@ class Main(object):
         self.G = None
         self.D = None
         self.refiner_optimizer = None
-        self.discriminator_loss = None
+        self.discriminator_optimizer = None
         self.combined_optimizer = None
         self.self_regularization_loss = None
         self.local_adversarial_loss = None
@@ -45,8 +45,8 @@ class Main(object):
             self.G.cuda(cfg.cuda_num)
             self.D.cuda(cfg.cuda_num)
 
-        self.refiner_optimizer = torch.optim.Adam(self.G.parameters(), lr=cfg.init_lr)
-        self.discriminator_loss = torch.optim.SGD(self.D.parameters(), lr=cfg.init_lr)
+        self.refiner_optimizer = torch.optim.SGD(self.G.parameters(), lr=cfg.init_lr)
+        self.discriminator_optimizer = torch.optim.SGD(self.D.parameters(), lr=cfg.init_lr)
         self.combined_optimizer = torch.optim.SGD([
             {'params': self.G.parameters()},
             {'params': self.D.parameters()}
@@ -70,7 +70,7 @@ class Main(object):
 
         optimizer_status = torch.load(os.path.join(cfg.save_path, cfg.optimizer_path))
         self.refiner_optimizer.load_state_dict(optimizer_status['optR'])
-        self.discriminator_loss.load_state_dict(optimizer_status['optD'])
+        self.discriminator_optimizer.load_state_dict(optimizer_status['optD'])
         self.combined_optimizer.load_state_dict(optimizer_status['optC'])
         self.current_step = optimizer_status['step']
 
@@ -99,7 +99,6 @@ class Main(object):
                                                   pin_memory=False, drop_last=True, num_workers=3)
         self.fake_images_iter = loop_iter(self.fake_images_loader)
         self.real_images_iter = loop_iter(self.real_images_loader)
-
 
     def pretrain_generator(self):
         # we first train the Rθ network with just self-regularization loss for 1,000 steps
@@ -130,32 +129,33 @@ class Main(object):
         self.D.train()
         self.G.eval()
         for step in range(cfg.d_pretrain):
+            # for real images
             real_images, _ = next(self.real_images_iter)
-            # real_images, _ = self.real_images_loader.__iter__().next()
             real_images = Variable(real_images).cuda(cfg.cuda_num)
-            fake_images, _ = next(self.fake_images_iter)
-            # fake_images, _ = self.fake_images_loader.__iter__().next()
-            fake_images = Variable(fake_images).cuda(cfg.cuda_num)
-            # refine fake images
-            refined_images = self.G(fake_images)
-            # prediction
             real_predictions = self.D(real_images).view(-1, 2)
-            refined_predictions = self.D(refined_images).view(-1, 2)
-            # create labels
-            real_labels = Variable(torch.zeros(real_predictions.size(0)).type(torch.LongTensor)).cuda(cfg.cuda_num)
-            refined_labels = Variable(torch.ones(real_predictions.size(0)).type(torch.LongTensor)).cuda(cfg.cuda_num)
-            # loss and accuracy
+            real_labels = Variable(torch.ones(real_predictions.size(0)).type(torch.LongTensor)).cuda(cfg.cuda_num)
             acc_real = get_accuracy(real_predictions, 'real')
-            acc_ref = get_accuracy(refined_predictions, 'refine')
-            d_loss_real = self.local_adversarial_loss(real_predictions, real_labels)
-            d_loss_refn = self.local_adversarial_loss(refined_predictions, refined_labels)
-            d_loss = d_loss_real + d_loss_refn
+            loss_real = self.local_adversarial_loss(real_predictions, real_labels)
 
-            self.discriminator_loss.zero_grad()
-            d_loss.backward()
-            self.discriminator_loss.step()
+            self.discriminator_optimizer.zero_grad()
+            loss_real.backward()
+            self.discriminator_optimizer.step()
+            # for fake images
+            fake_images, _ = next(self.fake_images_iter)
+            fake_images = Variable(fake_images).cuda(cfg.cuda_num)
+            refined_images = self.G(fake_images)
+            refined_predictions = self.D(refined_images).view(-1, 2)
+            refined_labels = Variable(torch.zeros(refined_predictions.size(0)).type(torch.LongTensor)).cuda(
+                cfg.cuda_num)
+            acc_ref = get_accuracy(refined_predictions, 'refine')
+            loss_ref = self.local_adversarial_loss(refined_predictions, refined_labels)
+
+            self.discriminator_optimizer.zero_grad()
+            loss_ref.backward()
+            self.discriminator_optimizer.step()
 
             if step % cfg.d_pre_per == 0 or (step == cfg.d_pretrain - 1):
+                d_loss = (loss_real + loss_ref) / 2
                 vis.draw_curve(value=d_loss, step=step, title='Pretrain Discriminator Loss')
                 print('------Step[%d/%d]------' % (step, cfg.d_pretrain))
                 print('# Discriminator: loss:%f  accuracy_real:%.2f accuracy_ref:%.2f'
@@ -197,12 +197,12 @@ class Main(object):
                 reg_loss = self.self_regularization_loss(refined_images, fake_images)
                 reg_loss = torch.mul(reg_loss, self.delta)
                 adv_loss = self.local_adversarial_loss(refined_predictions, refined_labels)
-                r_loss = reg_loss + adv_loss
+                refine_loss = reg_loss + adv_loss
                 self.my_timer.add_value('Get Refine Loss')
                 # backward
                 self.my_timer.track()
                 self.combined_optimizer.zero_grad()
-                r_loss.backward()
+                refine_loss.backward()
                 self.combined_optimizer.step()
                 self.my_timer.add_value('Backward Refine Loss')
 
@@ -225,6 +225,7 @@ class Main(object):
                 # use a history of refined images
                 self.my_timer.track()
                 refined_images = refined_images.detach()
+                images_diff = torch.mean(torch.abs(refined_images - fake_images)).cpu().data.numpy()
                 half_batch_from_image_history = image_history_buffer.get_from_image_history_buffer()
                 image_history_buffer.add_to_image_history_buffer(refined_images.cpu().data.numpy())
                 if len(half_batch_from_image_history):
@@ -239,12 +240,15 @@ class Main(object):
                 self.my_timer.add_value('Predict All Images')
                 # get all loss
                 self.my_timer.track()
-                real_labels = Variable(torch.zeros(real_predictions.size(0)).type(torch.LongTensor)).cuda(
+
+                real_labels = Variable(torch.ones(real_predictions.size(0)).type(torch.LongTensor)).cuda(
                     cfg.cuda_num)
+                refined_labels = Variable(torch.zeros(refined_predictions.size(0)).type(torch.LongTensor)).cuda(
+                    cfg.cuda_num)
+
                 pred_loss_real = self.local_adversarial_loss(real_predictions, real_labels)
                 acc_real = get_accuracy(real_predictions, 'real')
-                refined_labels = Variable(torch.ones(refined_predictions.size(0)).type(torch.LongTensor)).cuda(
-                    cfg.cuda_num)
+
                 pred_loss_refn = self.local_adversarial_loss(refined_predictions, refined_labels)
                 acc_ref = get_accuracy(refined_predictions, 'refine')
                 d_loss = pred_loss_refn + pred_loss_real
@@ -252,13 +256,13 @@ class Main(object):
                 self.my_timer.track()
                 self.D.zero_grad()
                 d_loss.backward()
-                self.discriminator_loss.step()
+                self.discriminator_optimizer.step()
                 self.my_timer.add_value('Backward Combine Loss')
 
-            if step % cfg.d_pre_per == 0:
+            if step % cfg.f_per == 0:
                 print('------Step[%d/%d]------Time Cost: %.2f seconds' % (step, cfg.train_steps, time.time() - step_timer))
                 print('# Refiner: loss:%.4f reg_loss:%.4f, adv_loss:%.4f' % (
-                    r_loss.data[0], reg_loss.data[0], adv_loss.data[0]))
+                    refine_loss.data[0], reg_loss.data[0], adv_loss.data[0]))
                 print('# Discrimintor: loss:%.4f real:%.4f(%.2f) refined:%.4f(%.2f)'
                       % (d_loss.data[0] / 2, pred_loss_real.data[0], acc_real, pred_loss_refn.data[0], acc_ref))
 
@@ -266,10 +270,12 @@ class Main(object):
                 vis.draw_images(real_images, 'Real Images')
                 vis.draw_images(fake_images, 'Simulated Images')
                 vis.draw_images(refined_images, 'Refined Images')
-                vis.draw_curve(value=r_loss, step=step, title='Refiner Loss')
+
+                vis.draw_curve(value=refine_loss, step=step, title='Refiner Loss')
                 vis.draw_curve(value=d_loss, step=step, title='Discriminator Loss')
                 vis.draw_curve(value=acc_real, step=step, title='Real Images Discriminator Accuracy')
                 vis.draw_curve(value=acc_ref, step=step, title='Refined Images Discriminator Accuracy')
+                vis.draw_curve(value=images_diff, step=step, title='Refined Difference')
 
                 time_dict = self.my_timer.get_all_time()
                 vis.draw_bars(time_dict, 'Time Cost (second)')
@@ -281,7 +287,7 @@ class Main(object):
                 torch.save(self.G.state_dict(), os.path.join(cfg.save_path, cfg.R_path % step))
                 state = {
                     'step': step,
-                    'optD': self.discriminator_loss.state_dict(),
+                    'optD': self.discriminator_optimizer.state_dict(),
                     'optR': self.refiner_optimizer.state_dict(),
                     'optC': self.combined_optimizer.state_dict(),
                 }

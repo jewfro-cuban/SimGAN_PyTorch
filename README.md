@@ -8,3 +8,5 @@ I try to re-organize AlexHex7's code, fix some bugs and speed up the training pr
 # Time cost
 
 ![Time Cost](https://raw.githubusercontent.com/automan000/SimGAN_PyTorch/master/images/time_cost.png)
+
+With Batch Size=128, it takes about 8 hours to finish 10000 training steps.

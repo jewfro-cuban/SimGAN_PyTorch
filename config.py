@@ -31,12 +31,14 @@ batch_size = 128
 buffer_size = 12800
 
 k_d = 1  # number of discriminator updates per step
-k_g = 10  # number of generative network updates per step, the author of the paper said it's 50
+k_g = 50  # number of generative network updates per step, the author of the paper said it's 50
 
 # output R pre-training result per times
 r_pre_per = 50
 # output D pre-training result per times
 d_pre_per = 20
+# output formal training result per times
+f_per = 1
 # save model dictionary and training dataset output result per train times
 save_per = 1000
 
