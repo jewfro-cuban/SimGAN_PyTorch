@@ -17,7 +17,7 @@ import tqdm
 
 import torch.nn.functional as F
 
-vis = VisdomPortal(env_name='SimGAN_{}'.format('Eye4'))
+vis = VisdomPortal(env_name='SimGAN_{}'.format('Eye3'))
 
 
 class Main(object):

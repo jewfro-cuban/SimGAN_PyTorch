@@ -5,7 +5,7 @@ cuda_use = torch.cuda.is_available()
 # which cuda to use
 cuda_num = 0
 
-init_lr = 0.001
+init_lr = 0.0001
 # lambda in paper, the author of the paper said it's 0.01
 delta = 1  # 0.1  # 0.0001
 img_width = 55
