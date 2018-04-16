@@ -6,10 +6,10 @@ class ResnetBlock(nn.Module):
         super(ResnetBlock, self).__init__()
         self.convs = nn.Sequential(
             nn.Conv2d(input_features, nb_features, 3, 1, 1),
-            # nn.BatchNorm2d(input_features),
+            nn.BatchNorm2d(input_features),
             nn.LeakyReLU(),
             nn.Conv2d(nb_features, nb_features, 3, 1, 1),
-            # nn.BatchNorm2d(nb_features),
+            nn.BatchNorm2d(nb_features),
         )
         self.relu = nn.LeakyReLU()
 
@@ -24,7 +24,7 @@ class Refiner(nn.Module):
 
         self.conv_1 = nn.Sequential(
             nn.Conv2d(in_features, nb_features, 3, stride=1, padding=1),
-            # nn.BatchNorm2d(nb_features),
+            nn.BatchNorm2d(nb_features),
             nn.LeakyReLU()
         )
 
@@ -52,32 +52,31 @@ class Discriminator(nn.Module):
 
         self.convs = nn.Sequential(
             nn.Conv2d(input_features, 96, 3, 2, 1),
-            # nn.BatchNorm2d(96),
+            nn.BatchNorm2d(96),
             nn.LeakyReLU(),
 
             nn.Conv2d(96, 64, 3, 2, 1),
-            # nn.BatchNorm2d(64),
+            nn.BatchNorm2d(64),
             nn.LeakyReLU(),
 
             nn.AvgPool2d(3, 1, 1),
 
             nn.Conv2d(64, 32, 3, 1, 1),
-            # nn.BatchNorm2d(32),
+            nn.BatchNorm2d(32),
             nn.LeakyReLU(),
 
             nn.Conv2d(32, 32, 1, 1, 0),
-            # nn.BatchNorm2d(32),
+            nn.BatchNorm2d(32),
             nn.LeakyReLU(),
 
             nn.Conv2d(32, 2, 1, 1, 0),
             # nn.BatchNorm2d(2),
             # nn.LeakyReLU(),
-
         )
 
     def forward(self, x):
         convs = self.convs(x)
-        output = convs.view(convs.size(0), -1, 2)
+        output = convs.permute(0, 2, 3, 1).contiguous().view(-1, 2)
         return output
 
 
