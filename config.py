@@ -7,7 +7,8 @@ cuda_num = 0
 
 init_lr = 0.0001
 # lambda in paper, the author of the paper said it's 0.01
-delta = 0.5  # 0.1  # 0.0001
+delta = 0.5  # 0.0001
+
 img_width = 55
 img_height = 35
 img_channels = 1
@@ -24,7 +25,7 @@ g_pretrain = 1000
 # pre-train D times
 d_pretrain = 200
 # train steps
-train_steps = 10000
+train_steps = 20000
 
 batch_size = 128
 # the history buffer size
