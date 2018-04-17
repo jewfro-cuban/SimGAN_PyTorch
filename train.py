@@ -18,7 +18,7 @@ import tqdm
 
 import torch.nn.functional as F
 
-vis = VisdomPortal(env_name='SimGAN_{}'.format('Eye4'))
+vis = VisdomPortal(env_name='SimGAN_{}'.format('Eye5'))
 
 
 class Main(object):
@@ -52,8 +52,8 @@ class Main(object):
         self.refiner_optimizer = torch.optim.Adam(self.G.parameters(), lr=cfg.init_lr)
         self.discriminator_optimizer = torch.optim.Adam(self.D.parameters(), lr=cfg.init_lr)
 
-        self.refiner_scheduler = StepLR(self.refiner_optimizer, step_size=1000)
-        self.discriminator_scheduler = StepLR(self.discriminator_optimizer, step_size=1000)
+        self.refiner_scheduler = StepLR(self.refiner_optimizer, step_size=2000)
+        self.discriminator_scheduler = StepLR(self.discriminator_optimizer, step_size=2000)
 
         self.self_regularization_loss = nn.L1Loss(size_average=True)
         self.local_adversarial_loss = nn.CrossEntropyLoss(size_average=True)  # LocalAdversarialLoss()
@@ -108,11 +108,11 @@ class Main(object):
         self.G.train()
         # fake_iter = iter(self.fake_images_loader)
         for step in range(cfg.g_pretrain):
-            faked_images, _ = next(self.fake_images_iter)
-            faked_images = Variable(faked_images).cuda(cfg.cuda_num)
-            refined_images = self.G(faked_images)
+            fake_images, _ = next(self.fake_images_iter)
+            fake_images = Variable(fake_images).cuda(cfg.cuda_num)
+            refined_images = self.G(fake_images)
             # regularization loss
-            reg_loss = self.self_regularization_loss(refined_images, faked_images)
+            reg_loss = self.self_regularization_loss(refined_images, fake_images)
             reg_loss = torch.mul(reg_loss, self.delta)
             # update model
             self.refiner_optimizer.zero_grad()
@@ -120,6 +120,8 @@ class Main(object):
             self.refiner_optimizer.step()
             # save
             if (step % cfg.r_pre_per == 0) or (step == cfg.g_pretrain - 1):
+                vis.draw_images(fake_images, 'Simulated Images')
+                vis.draw_images(refined_images, 'Refined Images')
                 print('------Step[%d/%d]------' % (step, cfg.g_pretrain))
                 print('# Refiner: loss: %.4f' % (reg_loss.data[0]))
                 vis.draw_curve(value=reg_loss, step=step, title='Pretrain Refiner Loss')
@@ -157,9 +159,11 @@ class Main(object):
 
             if step % cfg.d_pre_per == 0 or (step == cfg.d_pretrain - 1):
                 d_loss = (loss_real + loss_ref) / 2
+                vis.draw_images(real_images, 'Real Images')
+                vis.draw_images(fake_images, 'Simulated Images')
+                vis.draw_images(refined_images, 'Refined Images')
                 vis.draw_curve(value=acc_real, step=step, title='Pretrain Real Discriminator Accuracy')
                 vis.draw_curve(value=acc_ref, step=step, title='Pretrain Fake Discriminator Accuracy')
-
                 vis.draw_curve(value=d_loss, step=step, title='Pretrain Discriminator Loss')
                 print('------Step[%d/%d]------' % (step, cfg.d_pretrain))
                 print('# Discriminator: loss:%f  accuracy_real:%.2f accuracy_ref:%.2f'
@@ -264,8 +268,9 @@ class Main(object):
                 self.discriminator_optimizer.step()
                 self.my_timer.add_value('Backward Combine Loss')
 
-            self.refiner_scheduler.step()
-            self.discriminator_scheduler.step()
+            if step >= 10000:
+                self.refiner_scheduler.step()
+                self.discriminator_scheduler.step()
 
             if step % cfg.f_per == 0:
                 d_loss = (pred_loss_ref + pred_loss_real) / 2
