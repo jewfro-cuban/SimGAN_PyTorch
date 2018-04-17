@@ -1,19 +1,23 @@
 import os
 import time
+import tqdm
 import torch
 import torch.utils.data as Data
 import torchvision
+
 from torch.autograd import Variable
+from torch.optim.lr_scheduler import StepLR
 from torchvision import transforms
 from torch import nn
-import numpy as np
+
 
 from VisdomPortal.visportal.core import VisdomPortal
+
 from utils.image_history_buffer import ImagePool
 from utils.network import Discriminator, Refiner
 from utils.external_func import get_accuracy, loop_iter, MyTimer, LocalAdversarialLoss
 import config as cfg
-import tqdm
+
 
 import torch.nn.functional as F
 
@@ -50,6 +54,9 @@ class Main(object):
 
         self.refiner_optimizer = torch.optim.Adam(self.G.parameters(), lr=cfg.init_lr)
         self.discriminator_optimizer = torch.optim.Adam(self.D.parameters(), lr=cfg.init_lr)
+
+        self.refiner_scheduler = StepLR(self.refiner_optimizer, step_size=2000, gamma=0.1)
+        self.discriminator_scheduler = StepLR(self.discriminator_optimizer, step_size=2000, gamma=0.1)
 
         self.self_regularization_loss = nn.L1Loss(size_average=True)
         self.local_adversarial_loss = nn.CrossEntropyLoss(size_average=True)  # LocalAdversarialLoss()
@@ -169,7 +176,7 @@ class Main(object):
         image_pool = ImagePool(cfg.buffer_size)
         assert self.current_step < cfg.train_steps, 'Target step is smaller than current step!'
         step_timer = time.time()
-        for step in range(self.current_step, cfg.train_steps):
+        for step in range(self.current_step + 1, cfg.train_steps):
             self.current_step = step
             self.D.eval()
             self.G.train()
@@ -260,6 +267,11 @@ class Main(object):
                 self.discriminator_optimizer.step()
                 self.my_timer.add_value('Backward Combine Loss')
 
+            # udpate learning rate
+            self.refiner_scheduler.step()
+            self.discriminator_scheduler.step()
+
+            # draw
             if step % cfg.f_per == 0:
                 d_loss = (pred_loss_ref + pred_loss_real) / 2
                 print('------Step[%d/%d]------Time Cost: %.2f seconds' % (
