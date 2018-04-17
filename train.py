@@ -27,7 +27,7 @@ class Main(object):
         self.D = None
         self.refiner_optimizer = None
         self.discriminator_optimizer = None
-        self.combined_optimizer = None
+
         self.self_regularization_loss = None
         self.local_adversarial_loss = None
         self.delta = None
@@ -50,10 +50,6 @@ class Main(object):
 
         self.refiner_optimizer = torch.optim.Adam(self.G.parameters(), lr=cfg.init_lr)
         self.discriminator_optimizer = torch.optim.Adam(self.D.parameters(), lr=cfg.init_lr)
-        self.combined_optimizer = torch.optim.SGD([
-            {'params': self.G.parameters()},
-            {'params': self.D.parameters()}
-        ], lr=cfg.init_lr)
 
         self.self_regularization_loss = nn.L1Loss(size_average=True)
         self.local_adversarial_loss = nn.CrossEntropyLoss(size_average=True)  # LocalAdversarialLoss()
@@ -75,7 +71,6 @@ class Main(object):
         optimizer_status = torch.load(os.path.join(cfg.save_path, cfg.optimizer_path))
         self.refiner_optimizer.load_state_dict(optimizer_status['optR'])
         self.discriminator_optimizer.load_state_dict(optimizer_status['optD'])
-        self.combined_optimizer.load_state_dict(optimizer_status['optC'])
         self.current_step = optimizer_status['step']
 
         # Load pretrained model
@@ -140,7 +135,6 @@ class Main(object):
             acc_real = get_accuracy(real_predictions, 'real')
             loss_real = self.local_adversarial_loss(real_predictions, real_labels)
 
-
             # for fake images
             fake_images, _ = next(self.fake_images_iter)
             fake_images = Variable(fake_images).cuda(cfg.cuda_num)
@@ -152,21 +146,6 @@ class Main(object):
                 cfg.cuda_num)
             acc_ref = get_accuracy(refined_predictions, 'refine')
             loss_ref = self.local_adversarial_loss(refined_predictions, refined_labels)
-
-
-            # test = F.softmax(real_predictions, dim=1)
-            # test1 = test.cpu().data.numpy()[:, 0]
-            # test2 = test.cpu().data.numpy()[:, 1]
-            # print('---------------------------------------------------------------------------------')
-            # print('Real:   acc:{} 0:{} 1:{}'.format((test1 < test2).mean(),np.mean(test1), np.mean(test2)))
-            #
-            # test = F.softmax(refined_predictions, dim=1)
-            # test1 = test.cpu().data.numpy()[:, 0]
-            # test2 = test.cpu().data.numpy()[:, 1]
-            #  print('Refine: acc:{} 0:{} 1:{}'.format((test1 > test2).mean(), np.mean(test1), np.mean(test2)))
-
-
-
 
             self.discriminator_optimizer.zero_grad()
             ((loss_ref + loss_real) / 2).backward()
@@ -187,13 +166,10 @@ class Main(object):
 
     def train(self):
         print('Start Formal Training ...')
-
         image_pool = ImagePool(cfg.buffer_size)
-
         assert self.current_step < cfg.train_steps, 'Target step is smaller than current step!'
         step_timer = time.time()
         for step in range(self.current_step, cfg.train_steps):
-
             self.current_step = step
             self.D.eval()
             self.G.train()
@@ -249,12 +225,6 @@ class Main(object):
                 # refined_images = refined_images.detach()
                 images_diff = torch.mean(torch.abs(refined_images - fake_images)).cpu().data.numpy()
 
-                # print('-------------------------------------------')
-                # half_batch_from_image_history = image_history_buffer.get_from_image_history_buffer()
-                # print('Get real images mean: {}'.format(np.mean(fake_images.cpu().data.numpy())))
-                # print('Get fake images mean: {}'.format(np.mean(real_images.cpu().data.numpy())))
-                # print('Get history images mean: {}'.format(np.mean(half_batch_from_image_history)))
-                # print('Add history images mean: {}'.format(np.mean(refined_images.cpu().data.numpy())))
                 refined_images = refined_images.detach().cpu()
                 refined_images = image_pool.query(refined_images)
                 refined_images = refined_images.cuda(cfg.cuda_num)
@@ -321,8 +291,7 @@ class Main(object):
                 state = {
                     'step': step,
                     'optD': self.discriminator_optimizer.state_dict(),
-                    'optR': self.refiner_optimizer.state_dict(),
-                    'optC': self.combined_optimizer.state_dict(),
+                    'optR': self.refiner_optimizer.state_dict()
                 }
                 torch.save(state, os.path.join(cfg.save_path, cfg.optimizer_path))
 
