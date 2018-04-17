@@ -6,6 +6,7 @@ import torchvision
 from torch.autograd import Variable
 from torchvision import transforms
 from torch import nn
+from torch.optim.lr_scheduler import StepLR
 import numpy as np
 
 from VisdomPortal.visportal.core import VisdomPortal
@@ -17,7 +18,7 @@ import tqdm
 
 import torch.nn.functional as F
 
-vis = VisdomPortal(env_name='SimGAN_{}'.format('Eye3'))
+vis = VisdomPortal(env_name='SimGAN_{}'.format('Eye4'))
 
 
 class Main(object):
@@ -50,6 +51,9 @@ class Main(object):
 
         self.refiner_optimizer = torch.optim.Adam(self.G.parameters(), lr=cfg.init_lr)
         self.discriminator_optimizer = torch.optim.Adam(self.D.parameters(), lr=cfg.init_lr)
+
+        self.refiner_scheduler = StepLR(self.refiner_optimizer, step_size=1000)
+        self.discriminator_scheduler = StepLR(self.discriminator_optimizer, step_size=1000)
 
         self.self_regularization_loss = nn.L1Loss(size_average=True)
         self.local_adversarial_loss = nn.CrossEntropyLoss(size_average=True)  # LocalAdversarialLoss()
@@ -169,7 +173,7 @@ class Main(object):
         image_pool = ImagePool(cfg.buffer_size)
         assert self.current_step < cfg.train_steps, 'Target step is smaller than current step!'
         step_timer = time.time()
-        for step in range(self.current_step, cfg.train_steps):
+        for step in range((self.current_step + 1), cfg.train_steps):
             self.current_step = step
             self.D.eval()
             self.G.train()
@@ -259,6 +263,9 @@ class Main(object):
                 pred_loss_ref.backward()
                 self.discriminator_optimizer.step()
                 self.my_timer.add_value('Backward Combine Loss')
+
+            self.refiner_scheduler.step()
+            self.discriminator_scheduler.step()
 
             if step % cfg.f_per == 0:
                 d_loss = (pred_loss_ref + pred_loss_real) / 2
