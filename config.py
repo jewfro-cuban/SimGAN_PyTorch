@@ -21,11 +21,11 @@ real_path = 'data/MPIIGaze'
 
 # =================== training params ======================
 # pre-train R times
-g_pretrain = 1000
+g_pretrain = 500
 # pre-train D times
-d_pretrain = 200
+d_pretrain = 500
 # train steps
-train_steps = 20000
+train_steps = 12000
 
 batch_size = 128
 # the history buffer size
@@ -39,7 +39,7 @@ r_pre_per = 50
 # output D pre-training result per times
 d_pre_per = 20
 # output formal training result per times
-f_per = 20
+f_per = 1
 # save model dictionary and training dataset output result per train times
 save_per = 1000
 

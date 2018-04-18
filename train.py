@@ -4,26 +4,24 @@ import tqdm
 import torch
 import torch.utils.data as Data
 import torchvision
+import math
 
 from torch.autograd import Variable
 from torchvision import transforms
 from torch import nn
 
-from torch.optim.lr_scheduler import StepLR
-import numpy as np
-
-
+from torch.optim.lr_scheduler import StepLR, LambdaLR
 from VisdomPortal.visportal.core import VisdomPortal
 
 from utils.image_history_buffer import ImagePool
 from utils.network import Discriminator, Refiner
-from utils.external_func import get_accuracy, loop_iter, MyTimer, LocalAdversarialLoss
+from utils.external_func import get_accuracy, loop_iter, MyTimer
 import config as cfg
 
 
 import torch.nn.functional as F
 
-vis = VisdomPortal(env_name='SimGAN_{}'.format('Eye5'))
+vis = VisdomPortal(env_name='SimGAN_{}'.format('Eye8'))
 
 
 class Main(object):
@@ -57,8 +55,16 @@ class Main(object):
         self.refiner_optimizer = torch.optim.Adam(self.G.parameters(), lr=cfg.init_lr)
         self.discriminator_optimizer = torch.optim.Adam(self.D.parameters(), lr=cfg.init_lr)
 
-        self.refiner_scheduler = StepLR(self.refiner_optimizer, step_size=2000, gamma=0.1)
-        self.discriminator_scheduler = StepLR(self.discriminator_optimizer, step_size=2000, gamma=0.1)
+        def lambda_rule(step):
+            step = math.floor(step / 2000.)
+            lr_l = 1.0 - max(0., step - 3) / 3.
+            return lr_l
+
+        # self.refiner_scheduler = LambdaLR(self.refiner_optimizer, lr_lambda=lambda_rule)
+        # self.discriminator_scheduler = LambdaLR(self.discriminator_optimizer, lr_lambda=lambda_rule)
+
+        # self.refiner_scheduler = StepLR(self.refiner_optimizer, step_size=2000, gamma=0.1)
+        # self.discriminator_scheduler = StepLR(self.discriminator_optimizer, step_size=2000, gamma=0.1)
 
         self.self_regularization_loss = nn.L1Loss(size_average=True)
         self.local_adversarial_loss = nn.CrossEntropyLoss(size_average=True)  # LocalAdversarialLoss()
@@ -159,7 +165,7 @@ class Main(object):
             loss_ref = self.local_adversarial_loss(refined_predictions, refined_labels)
 
             self.discriminator_optimizer.zero_grad()
-            ((loss_ref + loss_real) / 2).backward()
+            (loss_real + loss_ref).backward()
             self.discriminator_optimizer.step()
 
             if step % cfg.d_pre_per == 0 or (step == cfg.d_pretrain - 1):
@@ -167,15 +173,20 @@ class Main(object):
                 vis.draw_images(real_images, 'Real Images')
                 vis.draw_images(fake_images, 'Simulated Images')
                 vis.draw_images(refined_images, 'Refined Images')
-                vis.draw_curve(value=acc_real, step=step, title='Pretrain Real Discriminator Accuracy')
-                vis.draw_curve(value=acc_ref, step=step, title='Pretrain Fake Discriminator Accuracy')
+
+                vis.draw_curves(values=[acc_real,acc_ref], names = ['real', 'refined'], step=step, title='Pretrain Discriminator Accuracy')
                 vis.draw_curve(value=d_loss, step=step, title='Pretrain Discriminator Loss')
+
                 print('------Step[%d/%d]------' % (step, cfg.d_pretrain))
                 print('# Discriminator: loss:%f  accuracy_real:%.2f accuracy_ref:%.2f'
                       % (d_loss.data[0], acc_real, acc_ref))
 
         print('Save D_pre to models/D_0.pkl')
         torch.save(self.D.state_dict(), os.path.join(cfg.save_path, 'D_0.pkl'))
+
+        # self.refiner_optimizer = torch.optim.SGD(self.D.parameters(), lr=cfg.init_lr)
+        # self.discriminator_optimizer = torch.optim.SGD(self.D.parameters(), lr=cfg.init_lr)
+
 
     def train(self):
         print('Start Formal Training ...')
@@ -208,12 +219,18 @@ class Main(object):
                 reg_loss = self.self_regularization_loss(refined_images, fake_images)
                 reg_loss = torch.mul(reg_loss, self.delta)
                 adv_loss = self.local_adversarial_loss(refined_predictions, refined_labels)
+
                 refine_loss = reg_loss + adv_loss
                 self.my_timer.add_value('Get Refine Loss')
+
+                vis.draw_images(fake_images, 'Simulated Images')
+                vis.draw_images(refined_images, 'Refined Images')
+
                 # backward
                 self.my_timer.track()
                 # has made some changes
                 self.refiner_optimizer.zero_grad()
+                # self.refiner_optimizer.zero_grad()
                 refine_loss.backward()
                 self.refiner_optimizer.step()
                 self.my_timer.add_value('Backward Refine Loss')
@@ -266,36 +283,43 @@ class Main(object):
                 self.my_timer.track()
                 # backward real discriminator loss
                 self.discriminator_optimizer.zero_grad()
-                pred_loss_real.backward()
+                d_loss = (pred_loss_ref + pred_loss_real)
+                d_loss.backward()
                 self.discriminator_optimizer.step()
                 # backward refined discriminator loss
-                self.discriminator_optimizer.zero_grad()
-                pred_loss_ref.backward()
-                self.discriminator_optimizer.step()
+                # self.discriminator_optimizer.zero_grad()
+                # pred_loss_ref.backward()
+                # self.discriminator_optimizer.step()
                 self.my_timer.add_value('Backward Combine Loss')
 
             # udpate learning rate
-            self.refiner_scheduler.step()
-            self.discriminator_scheduler.step()
+            # self.refiner_scheduler.step()
+            # self.discriminator_scheduler.step()
 
             if step % cfg.f_per == 0:
-                d_loss = (pred_loss_ref + pred_loss_real) / 2
                 print('------Step[%d/%d]------Time Cost: %.2f seconds' % (
                 step, cfg.train_steps, time.time() - step_timer))
                 print('# Refiner: loss:%.4f reg_loss:%.4f, adv_loss:%.4f' % (
                     refine_loss.data[0], reg_loss.data[0], adv_loss.data[0]))
                 print('# Discrimintor: loss:%.4f real:%.4f(%.2f) refined:%.4f(%.2f)'
-                      % (d_loss.data[0] / 2, pred_loss_real.data[0], acc_real, pred_loss_ref.data[0], acc_ref))
+                      % (d_loss.data[0], pred_loss_real.data[0], acc_real, pred_loss_ref.data[0], acc_ref))
 
                 # visualization
                 vis.draw_images(real_images, 'Real Images')
                 vis.draw_images(fake_images, 'Simulated Images')
                 vis.draw_images(refined_images, 'Refined Images')
 
-                vis.draw_curve(value=refine_loss, step=step, title='Refiner Loss')
-                vis.draw_curve(value=d_loss, step=step, title='Discriminator Loss')
-                vis.draw_curve(value=acc_real, step=step, title='Real Images Discriminator Accuracy')
-                vis.draw_curve(value=acc_ref, step=step, title='Refined Images Discriminator Accuracy')
+                vis.draw_curves(values=[refine_loss, reg_loss, adv_loss],
+                                names=['all', 'self regularization', 'local adversarial'], step=step,
+                                title='Refiner Loss')
+
+                vis.draw_curves(values=[d_loss, pred_loss_ref, pred_loss_real],
+                                names=['all', 'refined', 'real'], step=step,
+                                title='Discriminator Loss')
+
+                vis.draw_curves(values=[acc_real, acc_ref], names=['real', 'refined'], step=step,
+                                title='Images Discriminator Accuracy')
+
                 vis.draw_curve(value=images_diff, step=step, title='Refined Difference')
 
                 time_dict = self.my_timer.get_all_time()
