@@ -5,7 +5,7 @@ import torch
 import torch.utils.data as Data
 import torchvision
 import math
-
+import numpy as np
 from torch.autograd import Variable
 from torchvision import transforms
 from torch import nn
@@ -52,8 +52,8 @@ class Main(object):
             self.G.cuda(cfg.cuda_num)
             self.D.cuda(cfg.cuda_num)
 
-        self.refiner_optimizer = torch.optim.Adam(self.G.parameters(), lr=cfg.init_lr)
-        self.discriminator_optimizer = torch.optim.Adam(self.D.parameters(), lr=cfg.init_lr)
+        self.refiner_optimizer = torch.optim.SGD(self.G.parameters(), lr=cfg.init_lr)
+        self.discriminator_optimizer = torch.optim.SGD(self.D.parameters(), lr=cfg.init_lr)
 
         def lambda_rule(step):
             step = math.floor(step / 2000.)
@@ -66,8 +66,8 @@ class Main(object):
         # self.refiner_scheduler = StepLR(self.refiner_optimizer, step_size=2000, gamma=0.1)
         # self.discriminator_scheduler = StepLR(self.discriminator_optimizer, step_size=2000, gamma=0.1)
 
-        self.self_regularization_loss = nn.L1Loss(size_average=True)
-        self.local_adversarial_loss = nn.CrossEntropyLoss(size_average=True)  # LocalAdversarialLoss()
+        self.self_regularization_loss = nn.L1Loss(size_average=False)
+        self.local_adversarial_loss = nn.CrossEntropyLoss(size_average=False)  # LocalAdversarialLoss()
         self.delta = cfg.delta
 
     def load_previous_mode(self):
@@ -123,7 +123,7 @@ class Main(object):
             fake_images = Variable(fake_images).cuda(cfg.cuda_num)
             refined_images = self.G(fake_images)
             # regularization loss
-            reg_loss = self.self_regularization_loss(refined_images, fake_images)
+            reg_loss = self.self_regularization_loss(refined_images, fake_images) / cfg.batch_size / 10
             reg_loss = torch.mul(reg_loss, self.delta)
             # update model
             self.refiner_optimizer.zero_grad()
@@ -150,7 +150,7 @@ class Main(object):
             real_predictions = self.D(real_images)
             real_labels = Variable(torch.ones(real_predictions.size(0)).type(torch.LongTensor)).cuda(cfg.cuda_num)
             acc_real = get_accuracy(real_predictions, 'real')
-            loss_real = self.local_adversarial_loss(real_predictions, real_labels)
+            loss_real = self.local_adversarial_loss(real_predictions, real_labels) / cfg.batch_size / 10
 
             # for fake images
             fake_images, _ = next(self.fake_images_iter)
@@ -162,7 +162,7 @@ class Main(object):
             refined_labels = Variable(torch.zeros(refined_predictions.size(0)).type(torch.LongTensor)).cuda(
                 cfg.cuda_num)
             acc_ref = get_accuracy(refined_predictions, 'refine')
-            loss_ref = self.local_adversarial_loss(refined_predictions, refined_labels)
+            loss_ref = self.local_adversarial_loss(refined_predictions, refined_labels) / cfg.batch_size / 10
 
             self.discriminator_optimizer.zero_grad()
             (loss_real + loss_ref).backward()
@@ -184,7 +184,6 @@ class Main(object):
         print('Save D_pre to models/D_0.pkl')
         torch.save(self.D.state_dict(), os.path.join(cfg.save_path, 'D_0.pkl'))
 
-        # self.refiner_optimizer = torch.optim.SGD(self.D.parameters(), lr=cfg.init_lr)
         # self.discriminator_optimizer = torch.optim.SGD(self.D.parameters(), lr=cfg.init_lr)
 
 
@@ -216,9 +215,9 @@ class Main(object):
                 self.my_timer.track()
                 refined_labels = Variable(torch.ones(refined_predictions.size(0)).type(torch.LongTensor)).cuda(
                     cfg.cuda_num)
-                reg_loss = self.self_regularization_loss(refined_images, fake_images)
+                reg_loss = self.self_regularization_loss(refined_images, fake_images) / cfg.batch_size / 10
                 reg_loss = torch.mul(reg_loss, self.delta)
-                adv_loss = self.local_adversarial_loss(refined_predictions, refined_labels)
+                adv_loss = self.local_adversarial_loss(refined_predictions, refined_labels) / cfg.batch_size / 10
 
                 refine_loss = reg_loss + adv_loss
                 self.my_timer.add_value('Get Refine Loss')
@@ -274,22 +273,19 @@ class Main(object):
                 refined_labels = Variable(torch.zeros(refined_predictions.size(0)).type(torch.LongTensor)).cuda(
                     cfg.cuda_num)
 
-                pred_loss_real = self.local_adversarial_loss(real_predictions, real_labels)
+                pred_loss_real = self.local_adversarial_loss(real_predictions, real_labels) / cfg.batch_size / 10
                 acc_real = get_accuracy(real_predictions, 'real')
-                pred_loss_ref = self.local_adversarial_loss(refined_predictions, refined_labels)
+                pred_loss_ref = self.local_adversarial_loss(refined_predictions, refined_labels) / cfg.batch_size / 10
                 acc_ref = get_accuracy(refined_predictions, 'refine')
                 self.my_timer.add_value('Get Combine Loss')
 
                 self.my_timer.track()
-                # backward real discriminator loss
+                # backward discriminator loss
                 self.discriminator_optimizer.zero_grad()
-                d_loss = (pred_loss_ref + pred_loss_real)
+                d_loss = (pred_loss_ref + pred_loss_real) / 2.
                 d_loss.backward()
                 self.discriminator_optimizer.step()
-                # backward refined discriminator loss
-                # self.discriminator_optimizer.zero_grad()
-                # pred_loss_ref.backward()
-                # self.discriminator_optimizer.step()
+
                 self.my_timer.add_value('Backward Combine Loss')
 
             # udpate learning rate
@@ -308,13 +304,21 @@ class Main(object):
                 vis.draw_images(real_images, 'Real Images')
                 vis.draw_images(fake_images, 'Simulated Images')
                 vis.draw_images(refined_images, 'Refined Images')
+                # visualize softmax classification
+
+                real_p = F.softmax(real_predictions, dim=-1).cpu().data.numpy()
+                vis.draw_bars({'Fake': np.mean(real_p[:, 0]), 'Real':np.mean(real_p[:, 1])}, 'Real Discriminator SoftMax')
+
+                ref_p = F.softmax(refined_predictions, dim=-1).cpu().data.numpy()
+                vis.draw_bars({'Fake': np.mean(ref_p[:, 0]), 'Real': np.mean(ref_p[:, 1])}, 'Fake Discriminator SoftMax')
+
 
                 vis.draw_curves(values=[refine_loss, reg_loss, adv_loss],
-                                names=['all', 'self regularization', 'local adversarial'], step=step,
+                                names=['sum', 'self regularization', 'local adversarial'], step=step,
                                 title='Refiner Loss')
 
                 vis.draw_curves(values=[d_loss, pred_loss_ref, pred_loss_real],
-                                names=['all', 'refined', 'real'], step=step,
+                                names=['mean', 'refined', 'real'], step=step,
                                 title='Discriminator Loss')
 
                 vis.draw_curves(values=[acc_real, acc_ref], names=['real', 'refined'], step=step,

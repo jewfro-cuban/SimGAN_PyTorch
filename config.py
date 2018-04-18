@@ -5,9 +5,9 @@ cuda_use = torch.cuda.is_available()
 # which cuda to use
 cuda_num = 0
 
-init_lr = 0.0001
+init_lr = 0.001
 # lambda in paper, the author of the paper said it's 0.01
-delta = 0.5  # 0.0001
+delta = 0.01  # 0.5  # 0.0001
 
 img_width = 55
 img_height = 35
@@ -21,9 +21,9 @@ real_path = 'data/MPIIGaze'
 
 # =================== training params ======================
 # pre-train R times
-g_pretrain = 500
+g_pretrain = 1000
 # pre-train D times
-d_pretrain = 500
+d_pretrain = 200
 # train steps
 train_steps = 12000
 
