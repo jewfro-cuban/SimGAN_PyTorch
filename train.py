@@ -18,7 +18,7 @@ import tqdm
 
 import torch.nn.functional as F
 
-vis = VisdomPortal(env_name='SimGAN_{}'.format('Eye5'))
+vis = VisdomPortal(env_name='SimGAN_{}'.format('Eye6'))
 
 
 class Main(object):
@@ -52,8 +52,8 @@ class Main(object):
         self.refiner_optimizer = torch.optim.Adam(self.G.parameters(), lr=cfg.init_lr)
         self.discriminator_optimizer = torch.optim.Adam(self.D.parameters(), lr=cfg.init_lr)
 
-        self.refiner_scheduler = StepLR(self.refiner_optimizer, step_size=2000)
-        self.discriminator_scheduler = StepLR(self.discriminator_optimizer, step_size=2000)
+        self.refiner_scheduler = StepLR(self.refiner_optimizer, step_size=4000)
+        self.discriminator_scheduler = StepLR(self.discriminator_optimizer, step_size=4000)
 
         self.self_regularization_loss = nn.L1Loss(size_average=True)
         self.local_adversarial_loss = nn.CrossEntropyLoss(size_average=True)  # LocalAdversarialLoss()

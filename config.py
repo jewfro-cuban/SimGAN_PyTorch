@@ -38,7 +38,7 @@ r_pre_per = 50
 # output D pre-training result per times
 d_pre_per = 20
 # output formal training result per times
-f_per = 20
+f_per = 1
 # save model dictionary and training dataset output result per train times
 save_per = 1000
 
